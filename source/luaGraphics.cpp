@@ -681,37 +681,37 @@ static int lua_height(lua_State *L) {
 }
 
 static int lua_free(lua_State *L) {
-    int argc = lua_gettop(L);
+	int argc = lua_gettop(L);
 #ifndef SKIP_ERROR_HANDLING
-    if (argc != 1) return luaL_error(L, "wrong number of arguments");
+	if (argc != 1) return luaL_error(L, "wrong number of arguments");
+#endif
+	
+	lpp_texture* text = (lpp_texture*)(luaL_checkinteger(L, 1));
+#ifndef SKIP_ERROR_HANDLING
+	if (!text) return luaL_error(L, "invalid texture pointer");
+	if (text->magic != 0xABADBEEF) return luaL_error(L, "attempt to access wrong memory block type.");
 #endif
 
-    lpp_texture* text = (lpp_texture*)(luaL_checkinteger(L, 1));
-#ifndef SKIP_ERROR_HANDLING
-    if (!text) return luaL_error(L, "invalid texture pointer");
-    if (text->magic != 0xABADBEEF) return luaL_error(L, "attempt to access wrong memory block type.");
-#endif
+	// Free the texture
+	if (text->text) {
+		vita2d_free_texture(text->text);
+        	text->text = NULL;
+    	}
 
-    // Free the texture
-    if (text->text) {
-        vita2d_free_texture(text->text);
-        text->text = NULL;
-    }
+    	// Free additional data if it exists
+    	if (text->data) {
+        	// Assuming text->data points to an animated_texture structure
+		animated_texture *d = (animated_texture *)text->data;
+        	if (d->frames) free(d->frames);
+        	free(text->data);
+        	text->data = NULL;
+    	}
 
-    // Free additional data if it exists
-    if (text->data) {
-        // Assuming text->data points to an animated_texture structure
-        animated_texture *d = (animated_texture *)text->data;
-        if (d->frames) free(d->frames);
-        free(text->data);
-        text->data = NULL;
-    }
+    	// Free the texture structure
+    	free(text);
+    	text = NULL;
 
-    // Free the texture structure
-    free(text);
-    text = NULL;
-
-    return 0;
+    	return 0;
 }
 
 static int lua_createimage(lua_State *L) {
@@ -719,16 +719,64 @@ static int lua_createimage(lua_State *L) {
 #ifndef SKIP_ERROR_HANDLING
 	if (argc != 2 && argc != 3) return luaL_error(L, "wrong number of arguments");
 #endif
+
 	int w = luaL_checkinteger(L, 1);
 	int h = luaL_checkinteger(L, 2);
+
+#ifndef SKIP_ERROR_HANDLING
+    	if (w <= 0 || h <= 0) return luaL_error(L, "texture dimensions must be positive");
+#endif
+
 	uint32_t color = 0xFFFFFFFF;
 	if (argc == 3) color = luaL_checkinteger(L, 3);
+
 	lpp_texture* text = (lpp_texture*)malloc(sizeof(lpp_texture));
+#ifndef SKIP_ERROR_HANDLING
+	if (!text) return luaL_error(L, "failed to allocate memory for texture");
+#endif
+
 	text->magic = 0xABADBEEF;
+	text->text = NULL;
+	text->data = NULL;
+	
 	text->text = vita2d_create_empty_texture_rendertarget(w, h, SCE_GXM_TEXTURE_FORMAT_A8B8G8R8);
-	memset(vita2d_texture_get_datap(text->text), color, vita2d_texture_get_stride(text->text) * h);
+    	if (!text->text) {
+        	free(text); // Free the allocated memory if texture creation fails
+        	return luaL_error(L, "failed to create texture");
+    	}
+
+	unsigned char *texture_data = (unsigned char *)vita2d_texture_get_datap(text->text);
+    	if (!texture_data) {
+        	vita2d_free_texture(text->text);
+        	free(text);
+        	return luaL_error(L, "failed to get texture data");
+    	}
+
+	unsigned int stride = vita2d_texture_get_stride(text->text);
+
+	// Extract color components from the input color (A8B8G8R8 format)
+    	unsigned char alpha = (color >> 24) & 0xFF;
+    	unsigned char blue = (color >> 16) & 0xFF;
+    	unsigned char green = (color >> 8) & 0xFF;
+    	unsigned char red = color & 0xFF;
+
+    	// Iterate over each pixel in the texture
+    	for (int y = 0; y < h; y++) {
+        	for (int x = 0; x < w; x++) {
+            		// Calculate the pixel's memory location
+            		unsigned char *pixel = texture_data + (y * stride) + (x * 4);
+
+	        	// Modify the pixel's color values
+            		pixel[0] = alpha; // Alpha
+            		pixel[1] = blue;   // Blue
+            		pixel[2] = green;  // Green
+            		pixel[3] = red;    // Red
+        	}
+    	}
+
 	lua_pushinteger(L, (uint32_t)text);
 	return 1;
+
 }
 
 static int lua_filters(lua_State *L) {
