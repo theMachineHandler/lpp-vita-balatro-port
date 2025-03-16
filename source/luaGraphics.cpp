@@ -681,22 +681,37 @@ static int lua_height(lua_State *L) {
 }
 
 static int lua_free(lua_State *L) {
-	int argc = lua_gettop(L);
+    int argc = lua_gettop(L);
 #ifndef SKIP_ERROR_HANDLING
-	if (argc != 1) return luaL_error(L, "wrong number of arguments");
+    if (argc != 1) return luaL_error(L, "wrong number of arguments");
 #endif
-	lpp_texture* text = (lpp_texture*)(luaL_checkinteger(L, 1));
+
+    lpp_texture* text = (lpp_texture*)(luaL_checkinteger(L, 1));
 #ifndef SKIP_ERROR_HANDLING
-	if (text->magic != 0xABADBEEF) luaL_error(L, "attempt to access wrong memory block type.");
+    if (!text) return luaL_error(L, "invalid texture pointer");
+    if (text->magic != 0xABADBEEF) return luaL_error(L, "attempt to access wrong memory block type.");
 #endif
-	vita2d_free_texture(text->text);
-	if (text->data) {
-		animated_texture *d = (animated_texture *)text->data;
-		free(d->frames);
-		free(text->data);
-	}
-	free(text);
-	return 0;
+
+    // Free the texture
+    if (text->text) {
+        vita2d_free_texture(text->text);
+        text->text = NULL;
+    }
+
+    // Free additional data if it exists
+    if (text->data) {
+        // Assuming text->data points to an animated_texture structure
+        animated_texture *d = (animated_texture *)text->data;
+        if (d->frames) free(d->frames);
+        free(text->data);
+        text->data = NULL;
+    }
+
+    // Free the texture structure
+    free(text);
+    text = NULL;
+
+    return 0;
 }
 
 static int lua_createimage(lua_State *L) {
